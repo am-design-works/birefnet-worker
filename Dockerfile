@@ -1,39 +1,39 @@
 # BiRefNet Background Removal Worker for RunPod Serverless
 # Lightweight GPU worker for high-quality background removal
-#
-# Deploy: RunPod Serverless → Custom Source → Build from GitHub
-# GPU: RTX 3090 / RTX 4000 Ada / A4000 (16GB+ VRAM recommended)
 
-FROM runpod/base:0.6.2-cuda12.2.0
+FROM python:3.11-slim
 
 LABEL maintainer="Amoeba Works"
 LABEL description="BiRefNet background removal serverless worker"
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    python3-pip \
     libgl1-mesa-glx \
     libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
     curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && ln -sf /usr/bin/python3 /usr/bin/python
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip
+RUN pip install --upgrade pip
 
 # Install Python dependencies
 COPY requirements.txt /requirements.txt
-RUN pip3 install --no-cache-dir -r /requirements.txt
+RUN pip install --no-cache-dir -r /requirements.txt
 
-# Pre-download BiRefNet model (avoids cold-start download)
-# This downloads to ~/.u2net/BiRefNet-general-epoch_244.onnx (~970MB)
-RUN python3 -c "from rembg import new_session; new_session('birefnet-general')" && \
-    echo "BiRefNet model downloaded successfully"
+# Pre-download models to avoid cold-start download
+# Using u2net first as it's more reliable
+RUN python -c "from rembg import new_session; s = new_session('u2net'); print('u2net loaded')"
 
-# Also pre-download u2net as fallback
-RUN python3 -c "from rembg import new_session; new_session('u2net')" && \
-    echo "U2Net model downloaded successfully"
+# Try birefnet-general (may fail on CPU-only build, that's ok)
+RUN python -c "from rembg import new_session; s = new_session('birefnet-general'); print('birefnet loaded')" || \
+    echo "BiRefNet pre-download skipped (will download on first GPU use)"
 
 # Copy handler
 COPY handler.py /handler.py
 
 # RunPod serverless entry
-CMD ["python3", "-u", "/handler.py"]
+CMD ["python", "-u", "/handler.py"]
